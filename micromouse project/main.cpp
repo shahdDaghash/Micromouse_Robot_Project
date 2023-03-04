@@ -1,57 +1,123 @@
 #include <PID_v1.h>
+#include <MapFloat.h>
+#define Motor1Enable 5 // Motor Enamble pin Runs on PWM signal
+#define Motor1Forward A1   // Motor Forward pin
+#define Motor1Reverse A0   // Motor Reverse pin
 
-#define Motor1Enable 5
-#define Motor1Forward A1
-#define Motor1Backward A0
+#define Motor2Enable 6 // Motor Enamble pin Runs on PWM signal
+#define Motor2Forward 12   // Motor Forward pin
+#define Motor2Reverse 13   // Motor Reverse pin
 
-#define Motor2Enable 6
-#define Motor2Forward 12
-#define Motor2Backward 13
+#define IrLeft A4
+#define IrRight A5
+#define IrFront 4
 
-//TODO: make better names of encoder pins when connecting them
-#define encoderPin1 2 //encoder output 'A' must be connected with interrupt pin of arduino
-#define encoderPin2 A2 //Encoder Output 'B' must connected with interrupt pin of arduino
-#define encoderPin12 3 //encoder output 'A' must be connected with interrupt pin of arduino
-#define encoderPin22 A3 //encoder output 'B' must be connected with interrupt pin of arduino
+int encoderPin11 = 2;   // Encoder Output 'A' must connected with interrupt pin of arduino
+int encoderPin12 = A2;  // Encoder Otput 'B' must connected with intreput pin of arduino
+int encoderPin21 = 3;  // Encoder Output 'A' must connected with intreput pin of arduino
+int encoderPin22 = A3; // Encoder Otput 'B' must connected with intreput pin of arduino
 
-volatile int encoderValue1 = 0;
-volatile int encoderValue2 = 0;
+volatile long encoderValue = 0; // Raw encoder value
 
-int maxi = 100; //TODO: why is this used?
+int trigPinRight = 8;
+int echoPinRight = 9;
+int trigPinLeft = 7;
+int echoPinLeft = 11;
 
-int speed1 = maxi;
-int speed2 = maxi;
+boolean isWallFront = false;
+boolean isWallRight = false;
+boolean isWallLeft = false;
 
+//variable to control the max speed the motor can move
+int maxi = 100;
+
+int motor1Speed = maxi;
+int motor2Speed = maxi;
+
+
+
+String readString;  // This while store the user input data
+int User_Input = 0; // This while convert input string into integer
+
+volatile int lastEncoded = 0;   // Here updated value of encoder store.
+int PPR = 1600;                 // Encoder Pulse per revolution.
+int angle = 360;                // Maximum degree of motion.
+int REV = 0;                    // Set point REQUIRED ENCODER VALUE
+int lastMSB = 0;
+int lastLSB = 0;
+
+volatile int lastEncoded2 = 0;   // Here updated value of encoder store.
+volatile long encoderValue2 = 0; // Raw encoder value
+int REV2 = 0;
+
+double kp = 5, ki = 1, kd = 0.01; // modify for optimal performance
+double input = 0, output = 0, setpoint = 0;
+double input2 = 0, output2 = 0, setpoint2 = 0;
+PID myPID(&input, &output, &setpoint, kp, ki, kd, DIRECT);
+PID myPID2(&input2, &output2, &setpoint2, kp, ki, kd, DIRECT);
+
+
+unsigned long c = 0;
+
+unsigned long currentTime = 0;
+unsigned long lastTime = 0;
+
+// int trigPinFront = 4;
+// int echoPinFront = 10;
+
+float readingFront = 0;
+float readingRight = 0;
+float readingLeft = 0;
+
+float calibrationThreshold = 3.8;
+
+int turn_number = 180;
+
+int centerCounter = 0;
 void setup()
 {
-    Serial.begin(9600);
+    Serial.begin(9600); // initialize serial comunication
 
-    //pinMode for motors
+    // define pin mode for IR sensors
+    pinMode(IrLeft, INPUT);
+    pinMode(IrRight, INPUT);
+    pinMode(IrFront, INPUT);
+
+    //define trigger and echo pins for the ultrasonic sensors
+    pinMode(trigPinRight, OUTPUT);
+    pinMode(echoPinRight, INPUT);
+    pinMode(trigPinLeft, OUTPUT);
+    pinMode(echoPinLeft, INPUT);
+
+    //define pinmode for motor 1
     pinMode(Motor1Enable, OUTPUT);
     pinMode(Motor1Forward, OUTPUT);
-    pinMode(Motor1Backward, OUTPUT);
+    pinMode(Motor1Reverse, OUTPUT);
 
+    //define pinmode for motor 1 encoders
+    pinMode(encoderPin11, INPUT_PULLUP);
+    pinMode(encoderPin12, INPUT_PULLUP);
+    digitalWrite(encoderPin11, HIGH); // turn pullup resistor on
+    digitalWrite(encoderPin12, HIGH); // turn pullup resistor on
+
+    //define pinmode for motor 2
     pinMode(Motor2Enable, OUTPUT);
     pinMode(Motor2Forward, OUTPUT);
-    pinMode(Motor2Backward, OUTPUT);
+    pinMode(Motor2Reverse, OUTPUT);
 
-    pinMode(encoderPin1, INPUT_PULLUP);
-    pinMode(encoderPin2, INPUT_PULLUP);
-
-    //TODO: See how this part works exactly
-    digitalWrite(encoderPin1, HIGH); //turn pullup resistor on
-    digitalWrite(encoderPin2, HIGH); //turn pullup resistor on
-
-    pinMode(encoderPin12, INPUT_PULLUP);
+    //define pinmode for motor 2 encoders
+    pinMode(encoderPin21, INPUT_PULLUP);
     pinMode(encoderPin22, INPUT_PULLUP);
+    digitalWrite(encoderPin21, HIGH); // turn pullup resistor on
+    digitalWrite(encoderPin22, HIGH); // turn pullup resistor on
 
-    //TODO: See how this part works exactly
-    digitalWrite(encoderPin12, HIGH); //turn pullup resistor on
-    digitalWrite(encoderPin22, HIGH); //turn pullup resistor on
 
-    attachInterrupt(0, updateEncoder1, CHANGE);
+    //physical interrupt
+    //call updateEncoder when any change happens to pin 2 or pin 3
+    attachInterrupt(0, updateEncoder, CHANGE);
     attachInterrupt(1, updateEncoder2, CHANGE);
 
+    //set up pid for the two motors
     myPID.SetMode(AUTOMATIC);                // set PID in Auto mode
     myPID.SetSampleTime(1);                  // refresh rate of PID controller
     myPID.SetOutputLimits(-1 * maxi, maxi);  // this is the MAX PWM value to move motor, here change in value reflect change in speed of motor.
@@ -62,80 +128,318 @@ void setup()
 
 void loop()
 {
-    analogWrite(Motor1Enable, 30); // TODO: change speed in here
-    makeMotorMoveForward(Motor1Forward, Motor1Backward);
-
-    delay(10000);
-
-    makeMotorMoveBackward(Motor1Forward, Motor1Backward);
-    //moveForward();
+    moveForward();
+    if (centerCounter >=3)
+    {
+        stopMotors();
+        delay(10000);
+    }
 }
+
 
 void moveForward()
 {
-    //how is this working?
-    myPID.compute();
-    motor1PwmOut(speed_1);
-    myPID2.compute();
-    motor2PwmOut(speed_2);
+    detectWalls();
+    calibrate();
+    myPID.Compute(); // calculate new output
+    pwmOut(motor1Speed);
+    myPID2.Compute(); // calculate new output
+    pwmOut2(motor2Speed);
 }
 
-void motor1PwmOut(int out)
+
+void detectWalls()
 {
-    if(out > 0)
+    isWallFront = wallFront();
+    isWallRight = wallRight();
+    isWallLeft = wallLeft();
+    if (isWallFront && isWallLeft && !isWallRight)
     {
-        analogWrite(Motor1Enable, out);
-        makeMotorMoveForward(Motor1Forward, Motor1Backward);
+        stopMotors();
+        delay(500);
+        turnRight();
+        centerCounter++; //possible cneter cells - increment counter
+    }
+    else if (isWallFront && !isWallLeft && isWallRight)
+    {
+        stopMotors();
+        delay(500);
+        turnLeft();
+        centerCounter = 0; //not possible center cells - reset
+    }
+    else if (isWallFront && !isWallLeft && !isWallRight)
+    {
+        stopMotors();
+        delay(500);
+        turnLeft(); //following the left hand follower algorithm
+        centerCounter = 0; //not possible center cells - reset
+    }
+    else if (isWallFront && isWallLeft && isWallRight)
+    {
+        stopMotors();
+        delay(500);
+        changeDirections();
+        centerCounter = 0; //not possible center cells - reset
+    }
+    else if(!isWallFront && !isWallLeft) //TODO: Get back to this case
+    {
+        delay(410);
+        stopMotors();
+        delay(500);
+        turnLeft();
+        moveSlightlyForward();
+        centerCounter = 0; //not possible center cells - reset
+    }
+}
+
+void stopMotors()
+{
+    digitalWrite(Motor1Forward, LOW);
+    digitalWrite(Motor1Reverse, LOW);
+    digitalWrite(Motor2Forward, LOW);
+    digitalWrite(Motor2Reverse, LOW);
+}
+
+void turnRight()
+{
+    encoderValue2 = 0;
+    encoderValue = 0;
+    int avg = 0;
+    while (avg < turn_number)
+    {
+        REV = maxi;
+        REV2 = -1 * maxi;
+        myPID.Compute();
+        myPID2.Compute();
+        pwmOut(REV);
+        pwmOut2(REV2);
+        avg = (encoderValue + encoderValue2) / 2;
+    }
+    // moveSlightlyForward();
+    stopMotors();
+    c = millis();
+    while (millis() - c <= 500)
+        ;
+}
+
+void turnLeft()
+{
+    encoderValue2 = 0;
+    encoderValue = 0;
+    int avg = 0;
+    while (avg < turn_number)
+    {
+        REV = -1 * maxi;
+        REV2 = maxi;
+        myPID.Compute();
+        myPID2.Compute();
+        pwmOut(REV);
+        pwmOut2(REV2);
+        avg = (encoderValue + encoderValue2) / 2;
+    }
+    stopMotors();
+    c = millis();
+    while (millis() - c <= 500);
+}
+
+void changeDirections() //turn right twice
+{
+    encoderValue2 = 0;
+    encoderValue = 0;
+    int avg = 0;
+    while (avg < turn_number)
+    {
+        REV = maxi;
+        REV2 = -1 * maxi;
+        myPID.Compute();
+        myPID2.Compute();
+        pwmOut(REV);
+        pwmOut2(REV2);
+        avg = (encoderValue + encoderValue2) / 2;
+    }
+
+    encoderValue2 = 0;
+    encoderValue = 0;
+    avg = 0;
+    while (avg < turn_number)
+    {
+        REV = maxi;
+        REV2 = -1 * maxi;
+        myPID.Compute();
+        myPID2.Compute();
+        pwmOut(REV);
+        pwmOut2(REV2);
+        avg = (encoderValue + encoderValue2) / 2;
+    }
+}
+
+
+void moveSlightlyForward()
+{
+    motor1Speed = maxi;
+    motor2Speed = maxi;
+    myPID.Compute(); // calculate new output
+    pwmOut(motor1Speed);
+    myPID2.Compute(); // calculate new output
+    pwmOut2(motor2Speed);
+    //delay is the worst case scenario here !!
+    unsigned long startTime = millis();
+    while(millis() - startTime < 1500)
+    {
+        calibrate();
+        if (digitalRead(IrFront) == 0)
+        {
+            break;
+        }
+    }
+}
+
+void calibrate()
+{
+    motor1Speed = maxi;
+    motor2Speed = maxi;
+    getUltrasonicReadings();
+    float diff = readingRight - readingLeft;
+    float absDiff = abs(diff);
+    float map_value = mapFloat(absDiff, calibrationThreshold, 10, 3, 11); // 2,9 working well with 80 speed
+    if (wallRight() && wallLeft())
+    {
+        if (absDiff > calibrationThreshold)
+        {
+            if (diff > 0)
+            {
+                motor2Speed = maxi - map_value;
+            }
+            else
+            {
+                motor1Speed = maxi - map_value;
+            }
+        }
     }
     else
     {
-        analogWrite(Motor1Enable, abs(out));
-        makeMotorMoveBackward(Motor1Forward, Motor1Backward);
+        if (wallRight() && readingRight > 9)
+        {
+            float map_value = mapFloat(readingRight, 9.5, 14, 2, 5.5);
+            motor2Speed = maxi - map_value;
+        }
+        else if(wallLeft() && readingLeft < 7.5)
+        {
+            float map_value = mapFloat(readingLeft, 3, 9, 2, 5.5);
+            motor2Speed = maxi - map_value;
+        }
+        else if (wallLeft() && readingLeft > 8)
+        {
+            float map_value = mapFloat(readingLeft, 9.5, 14, 2, 5.5);
+            motor1Speed = maxi - map_value;
+        }
+        else if(wallRight() && readingRight < 7.5)
+        {
+            float map_value = mapFloat(readingRight, 3, 9, 2, 5.5);
+            motor1Speed = maxi - map_value;
+        }
     }
+    Serial.print("Left: ");
+    Serial.print(motor1Speed);
+    Serial.print("  , right: ");
+    Serial.println(motor2Speed);    
 }
 
-void motor2PwmOut(int out)
+void getUltrasonicReadings()
 {
-    if(out > 0)
+    readingRight = readUltrasonicDistance(trigPinRight, echoPinRight);
+    readingLeft = readUltrasonicDistance(trigPinLeft, echoPinLeft);
+}
+
+float readUltrasonicDistance(int triggerPin, int echoPin) //TODO: Verify the reading is done correctly
+{
+    int subValue = 0;
+    // pinMode(triggerPin, OUTPUT);
+    digitalWrite(triggerPin, LOW);
+    long lastRead = micros();
+    while (micros() - lastRead < 2)
+        ;
+    digitalWrite(triggerPin, HIGH);
+    lastRead = micros();
+    while (micros() - lastRead < 15)
+        ;
+    digitalWrite(triggerPin, LOW);
+    // pinMode(echoPin, INPUT);
+    float duration = pulseIn(echoPin, HIGH);
+    float distance = (duration / 2) / 29.1;
+    return distance - subValue;
+}
+
+
+void pwmOut(int outSpeed)
+{
+    if (outSpeed > 0) //move forward
     {
-        analogWrite(Motor2Enable, out);
-        makeMotorMoveForward(Motor2Forward, Motor2Backward);
+        analogWrite(Motor1Enable, outSpeed); // Enabling motor enable pin to reach the desire angle
+        forward(Motor1Forward, Motor1Reverse); //move motor forward
     }
-    else
+    else //move backward
     {
-        analogWrite(Motor2Enable, abs(out));
-        makeMotorMoveBackward(Motor2Forward, Motor2Backward);
+        analogWrite(Motor1Enable, abs(outSpeed)); // Enabling motor enable pin to reach the desire angle
+        reverse(Motor1Forward, Motor1Reverse); //move motor backwards
     }
 }
 
-//used in motor1PwmOut and motor2PwmOut
-void makeMotorMoveForward(int motFor, int motBack)
+void pwmOut2(int outSpeed)
 {
-    digitalWrite(motFor, HIGH);
-    digitalWrite(motBack, LOW);
+    if (outSpeed > 0) //move forward
+    {
+        // if REV > encoderValue motor move in forward direction.
+        analogWrite(Motor2Enable, outSpeed); // Enabling motor enable pin to reach the desire angle
+        forward(Motor2Forward, Motor2Reverse); //move motor forward
+    }
+    else //move backward
+    {
+        analogWrite(Motor2Enable, abs(outSpeed)); // if REV < encoderValue motor move in forward direction.
+        reverse(Motor2Forward, Motor2Reverse);  //move motor backwards
+    }
 }
 
-//used in motor1PwmOut and motor2PwmOut
-void makeMotorMoveBackward(int motFor, int motBack)
+//called when physical interrupt occurs to pin 2 from motor 1
+void updateEncoder()
 {
-    digitalWrite(motFor, LOW);
-    digitalWrite(motBack, HIGH);
+    encoderValue++;
 }
 
-// used with attaching the interrupt
-void updateEncoder1()
-{
-    encoderValue1++;
-}
-
-// used with attaching the interrupt
+//called when physical interrupt occurs to pin 2 from motor 2
 void updateEncoder2()
 {
     encoderValue2++;
 }
 
+//move the motor forward
+void forward(int MotF, int MotR)
+{
+    digitalWrite(MotF, HIGH);
+    digitalWrite(MotR, LOW);
+}
 
+//move the motor backwards
+void reverse(int MotF, int MotR)
+{
+    digitalWrite(MotF, LOW);
+    digitalWrite(MotR, HIGH);
+}
 
+//detect if there is a wall to the front
+boolean wallFront()
+{
+    return digitalRead(IrFront) == 0;
+}
 
+//detect if there is a wall to the left
+boolean wallLeft()
+{
+    return digitalRead(IrLeft) == 0;
+}
 
-
+//chack if there is a wall to the right
+boolean wallRight()
+{
+    return digitalRead(IrRight) == 0;
+}
