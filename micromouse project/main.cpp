@@ -108,8 +108,8 @@ void loop()
 
 void moveForward()
 {
-    detectWalls();
     calibrate();
+    detectWalls();
     pwmOut(motor1Speed);
     pwmOut2(motor2Speed);
 }
@@ -144,7 +144,7 @@ void detectWalls()
       turnLeft();
       centerCounter = 0; //not possible center cells - reset
     }
-    else if(!isWallFront && isWallRight && !isWallLeft && (millis() - justTurnedLeft > 1200)){
+    else if(!isWallFront && isWallRight && !isWallLeft && (millis() - justTurnedLeft > 1150)){
       delay(410);
       stopMotors();
       delay(500);
@@ -152,6 +152,7 @@ void detectWalls()
       moveSlightlyForward();
       centerCounter = 0; //not possible center cells - reset
     }
+    calibrate();
 
     // if (isWallFront && isWallLeft && !isWallRight)
     // {
@@ -275,7 +276,7 @@ void moveSlightlyForward()
     pwmOut2(motor2Speed);
     //delay is the worst case scenario here !!
     unsigned long startTime = millis();
-    while(millis() - startTime < 1200)
+    while(millis() - startTime < 800) //!
     {
         calibrate();
         if (digitalRead(IrFront) == 0)
@@ -316,7 +317,7 @@ void calibrate()
         }
         else if(wallLeft() && readingLeft < 7.5)
         {
-            float map_value = mapFloat(readingLeft, 3, 9, 2, 5.5);
+            float map_value = mapFloat(readingLeft, 4, 9, 2, 5.5);
             motor2Speed = maxi - map_value;
         }
         else if (wallLeft() && readingLeft > 8)
@@ -326,7 +327,7 @@ void calibrate()
         }
         else if(wallRight() && readingRight < 7.5)
         {
-            float map_value = mapFloat(readingRight, 3, 9, 2, 5.5);
+            float map_value = mapFloat(readingRight, 4, 9, 2, 5.5);
             motor1Speed = maxi - map_value;
         }
     }
