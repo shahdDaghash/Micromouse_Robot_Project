@@ -1,4 +1,3 @@
-#include <PID_v1.h>
 #include <MapFloat.h>
 #define Motor1Enable 5 // Motor Enamble pin Runs on PWM signal
 #define Motor1Forward A1   // Motor Forward pin
@@ -34,38 +33,14 @@ int maxi = 100;
 int motor1Speed = maxi;
 int motor2Speed = maxi;
 
-
-
-String readString;  // This while store the user input data
-int User_Input = 0; // This while convert input string into integer
-
 volatile int lastEncoded = 0;   // Here updated value of encoder store.
-int PPR = 1600;                 // Encoder Pulse per revolution.
-int angle = 360;                // Maximum degree of motion.
 int REV = 0;                    // Set point REQUIRED ENCODER VALUE
-int lastMSB = 0;
-int lastLSB = 0;
-
-volatile int lastEncoded2 = 0;   // Here updated value of encoder store.
 volatile long encoderValue2 = 0; // Raw encoder value
 int REV2 = 0;
 
-double kp = 5, ki = 1, kd = 0.01; // modify for optimal performance
-double input = 0, output = 0, setpoint = 0;
-double input2 = 0, output2 = 0, setpoint2 = 0;
-PID myPID(&input, &output, &setpoint, kp, ki, kd, DIRECT);
-PID myPID2(&input2, &output2, &setpoint2, kp, ki, kd, DIRECT);
-
-
 unsigned long c = 0;
+unsigned long justTurnedLeft;
 
-unsigned long currentTime = 0;
-unsigned long lastTime = 0;
-
-// int trigPinFront = 4;
-// int echoPinFront = 10;
-
-float readingFront = 0;
 float readingRight = 0;
 float readingLeft = 0;
 
@@ -74,6 +49,7 @@ float calibrationThreshold = 3.8;
 int turn_number = 180;
 
 int centerCounter = 0;
+
 void setup()
 {
     Serial.begin(9600); // initialize serial comunication
@@ -117,13 +93,6 @@ void setup()
     attachInterrupt(0, updateEncoder, CHANGE);
     attachInterrupt(1, updateEncoder2, CHANGE);
 
-    //set up pid for the two motors
-    myPID.SetMode(AUTOMATIC);                // set PID in Auto mode
-    myPID.SetSampleTime(1);                  // refresh rate of PID controller
-    myPID.SetOutputLimits(-1 * maxi, maxi);  // this is the MAX PWM value to move motor, here change in value reflect change in speed of motor.
-    myPID2.SetMode(AUTOMATIC);               // set PID in Auto mode
-    myPID2.SetSampleTime(1);                 // refresh rate of PID controller
-    myPID2.SetOutputLimits(-1 * maxi, maxi); // this is the MAX PWM value to move motor, here change in value reflect change in speed of motor.
 }
 
 void loop()
@@ -141,9 +110,7 @@ void moveForward()
 {
     detectWalls();
     calibrate();
-    myPID.Compute(); // calculate new output
     pwmOut(motor1Speed);
-    myPID2.Compute(); // calculate new output
     pwmOut2(motor2Speed);
 }
 
@@ -153,43 +120,76 @@ void detectWalls()
     isWallFront = wallFront();
     isWallRight = wallRight();
     isWallLeft = wallLeft();
-    if (isWallFront && isWallLeft && !isWallRight)
-    {
+    if(isWallFront && isWallRight && isWallLeft ){
         stopMotors();
+        delay(500);
+        changeDirections();
+        centerCounter = 0; //not possible center cells - reset      
+    }
+    else if (isWallFront && !isWallRight && isWallLeft){
+       stopMotors();
         delay(500);
         turnRight();
         centerCounter++; //possible cneter cells - increment counter
     }
-    else if (isWallFront && !isWallLeft && isWallRight)
-    {
-        stopMotors();
-        delay(500);
-        turnLeft();
-        centerCounter = 0; //not possible center cells - reset
+    else if(isWallFront && isWallRight && !isWallLeft){
+      stopMotors();
+      delay(500);
+      turnLeft();
+      centerCounter = 0; //not possible center cells - reset
     }
-    else if (isWallFront && !isWallLeft && !isWallRight)
-    {
-        stopMotors();
-        delay(500);
-        turnLeft(); //following the left hand follower algorithm
-        centerCounter = 0; //not possible center cells - reset
+    else if(isWallFront && !isWallRight && !isWallLeft){
+      stopMotors();
+      delay(500);
+      turnLeft();
+      centerCounter = 0; //not possible center cells - reset
     }
-    else if (isWallFront && isWallLeft && isWallRight)
-    {
-        stopMotors();
-        delay(500);
-        changeDirections();
-        centerCounter = 0; //not possible center cells - reset
+    else if(!isWallFront && isWallRight && !isWallLeft && (millis() - justTurnedLeft > 1200)){
+      delay(410);
+      stopMotors();
+      delay(500);
+      turnLeft();
+      moveSlightlyForward();
+      centerCounter = 0; //not possible center cells - reset
     }
-    else if(!isWallFront && !isWallLeft) //TODO: Get back to this case
-    {
-        delay(410);
-        stopMotors();
-        delay(500);
-        turnLeft();
-        moveSlightlyForward();
-        centerCounter = 0; //not possible center cells - reset
-    }
+
+    // if (isWallFront && isWallLeft && !isWallRight)
+    // {
+    //     stopMotors();
+    //     delay(500);
+    //     turnRight();
+    //     centerCounter++; //possible cneter cells - increment counter
+    // }
+    // else if (isWallFront && !isWallLeft && isWallRight)
+    // {
+    //     stopMotors();
+    //     delay(500);
+    //     turnLeft();
+    //     centerCounter = 0; //not possible center cells - reset
+    // }
+    // else if (isWallFront && !isWallLeft && !isWallRight)
+    // {
+    //     stopMotors();
+    //     delay(500);
+    //     turnLeft(); //following the left hand follower algorithm
+    //     centerCounter = 0; //not possible center cells - reset
+    // }
+    // else if (isWallFront && isWallLeft && isWallRight)
+    // {
+    //     stopMotors();
+    //     delay(500);
+    //     changeDirections();
+    //     centerCounter = 0; //not possible center cells - reset
+    // }
+    // else if(!isWallFront && !isWallLeft) //TODO: Get back to this case
+    // {
+    //     delay(410);
+    //     stopMotors();
+    //     delay(500);
+    //     turnLeft();
+    //     moveSlightlyForward();
+    //     centerCounter = 0; //not possible center cells - reset
+    // }
 }
 
 void stopMotors()
@@ -209,8 +209,6 @@ void turnRight()
     {
         REV = maxi;
         REV2 = -1 * maxi;
-        myPID.Compute();
-        myPID2.Compute();
         pwmOut(REV);
         pwmOut2(REV2);
         avg = (encoderValue + encoderValue2) / 2;
@@ -231,12 +229,11 @@ void turnLeft()
     {
         REV = -1 * maxi;
         REV2 = maxi;
-        myPID.Compute();
-        myPID2.Compute();
         pwmOut(REV);
         pwmOut2(REV2);
         avg = (encoderValue + encoderValue2) / 2;
     }
+    justTurnedLeft = millis();
     stopMotors();
     c = millis();
     while (millis() - c <= 500);
@@ -251,8 +248,6 @@ void changeDirections() //turn right twice
     {
         REV = maxi;
         REV2 = -1 * maxi;
-        myPID.Compute();
-        myPID2.Compute();
         pwmOut(REV);
         pwmOut2(REV2);
         avg = (encoderValue + encoderValue2) / 2;
@@ -265,8 +260,6 @@ void changeDirections() //turn right twice
     {
         REV = maxi;
         REV2 = -1 * maxi;
-        myPID.Compute();
-        myPID2.Compute();
         pwmOut(REV);
         pwmOut2(REV2);
         avg = (encoderValue + encoderValue2) / 2;
@@ -278,13 +271,11 @@ void moveSlightlyForward()
 {
     motor1Speed = maxi;
     motor2Speed = maxi;
-    myPID.Compute(); // calculate new output
     pwmOut(motor1Speed);
-    myPID2.Compute(); // calculate new output
     pwmOut2(motor2Speed);
     //delay is the worst case scenario here !!
     unsigned long startTime = millis();
-    while(millis() - startTime < 1500)
+    while(millis() - startTime < 1200)
     {
         calibrate();
         if (digitalRead(IrFront) == 0)
